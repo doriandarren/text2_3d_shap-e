@@ -1,0 +1,16 @@
+version: "3.9"
+
+services:
+  shap-e-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: shap-e-api
+    ports:
+      - "7861:7861"
+    volumes:
+      # Carpeta outputs del proyecto -> /app/outputs dentro del contenedor
+      - ./outputs:/app/outputs
+      # (opcional) cache de modelos HF para que no los baje cada vez
+      - ./hf_cache:/root/.cache/huggingface
+    restart: unless-stopped
