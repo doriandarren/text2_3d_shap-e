@@ -1,5 +1,4 @@
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import torch
 from diffusers import ShapEPipeline
@@ -9,29 +8,25 @@ import os
 import numpy as np
 import trimesh
 import shutil
+import re
 from datetime import datetime
 
 app = FastAPI(title="Text to 3D with Shap-E")
 
 
 class GenerateRequest(BaseModel):
+    title: str | None = None          # ✅ AÑADIDO
     prompt: str
     seed: int = 0
     guidance_scale: float = 15.0
     num_steps: int = 64
 
 
-# ----------------------------
-#  CARGA DEL MODELO AL ARRANCAR
-# ----------------------------
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-pipe = ShapEPipeline.from_pretrained("openai/shap-e")
-pipe = pipe.to(device)
+pipe = ShapEPipeline.from_pretrained("openai/shap-e").to(device)
 
 
 def ply_to_glb(ply_path: str) -> str:
-    """Convierte el .ply a .glb con rotaciones útiles."""
     mesh = trimesh.load(ply_path)
 
     rot_x = trimesh.transformations.rotation_matrix(-np.pi / 2, [1, 0, 0])
@@ -45,11 +40,19 @@ def ply_to_glb(ply_path: str) -> str:
         return glb_file.name
 
 
+def safe_slug(value: str) -> str:
+    """
+    Convierte a snake_case seguro: letras/números/_ y sin path traversal.
+    """
+    value = value.strip().lower()
+    value = value.replace(" ", "_")
+    value = re.sub(r"[^a-z0-9_]+", "", value)
+    value = re.sub(r"_+", "_", value).strip("_")
+    return value
+
+
 @app.post("/generate")
 def generate_3d(req: GenerateRequest):
-    """
-    Recibe prompt → devuelve y guarda un archivo .glb.
-    """
     try:
         generator = torch.Generator(device=device).manual_seed(req.seed)
 
@@ -80,24 +83,31 @@ def generate_3d(req: GenerateRequest):
         except:
             pass
 
-        # Asegurar carpeta outputs
+        # Outputs
         output_dir = "/app/outputs"
         os.makedirs(output_dir, exist_ok=True)
 
-        timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
-        filename = f"model_{timestamp}.glb"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        # ✅ construir filename seguro
+        title = safe_slug(req.title) if req.title else ""
+        if title:
+            filename = f"{title}_{timestamp}.glb"
+        else:
+            filename = f"model_{timestamp}.glb"
+
         saved_path = os.path.join(output_dir, filename)
 
-        # Mover archivo temporal a carpeta outputs (cross-FS safe)
+        # Mover archivo temporal a outputs
         shutil.move(glb_tmp_path, saved_path)
 
         print(f"[Shap-E] Guardado: {saved_path}")
 
-        return FileResponse(
-            saved_path,
-            media_type="model/gltf-binary",
-            filename=filename,
-        )
+        return {
+            "filename": filename,
+            "path": saved_path,
+            "prompt": req.prompt
+        }
 
     except Exception as e:
         print(f"[Shap-E] ERROR: {e}")

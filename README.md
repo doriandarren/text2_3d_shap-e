@@ -19,7 +19,11 @@ netsh advfirewall firewall add rule name="ShapE_API_7861" dir=in action=allow pr
 
 
 docker compose down
+docker compose up -d --build
+
 docker compose up --build
+
+
 
 docker compose up
 docker compose down
